@@ -1,15 +1,106 @@
-import { useState, useMemo, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 
-import PlusIcon from "./assets/plusicon.svg?react";
-import XIcon from "./assets/xicon.svg?react";
-import GripIcon from "./assets/gripicon.svg?react";
-import SearchIcon from "./assets/searchicon.svg?react";
-import PalleteIcon from "./assets/paletteicon.svg?react";
 import ColorSortIcon from "./assets/colorsorticon.svg?react";
+import GripIcon from "./assets/gripicon.svg?react";
 import NamespaceSortIcon from "./assets/namespaceicon.svg?react";
+import SearchIcon from "./assets/searchicon.svg?react";
 import TypeSortIcon from "./assets/typesorticon.svg?react";
+import XIcon from "./assets/xicon.svg?react";
 
 import "./MinecraftItemBuilder.css";
+
+// Simple helper type
+export interface Dictionary<T> {
+  [Key: string]: T;
+}
+
+// React props for the HueRangePicker component
+// TODO: Move this and its component in their own file
+export interface HueRangePickerProps {
+  hueRange: [number, number];
+  satRange: [number, number];
+  lumRange: [number, number];
+  onHueChange: React.Dispatch<React.SetStateAction<[number, number]>>;
+  onSatChange: React.Dispatch<React.SetStateAction<[number, number]>>;
+  onLumChange: React.Dispatch<React.SetStateAction<[number, number]>>;
+}
+
+// A representation of a Minecraft double chest filter for use by Copper Golems
+export interface Cell {
+  id: number;
+  slots: (Slot | null)[];
+}
+
+// A Minecraft item as seen in public/items.json
+export interface Item {
+  id: string;
+  name: string;
+  sprite: string;
+  color: Color;
+  category: string[];
+  group: string[];
+  material: string;
+  stack_size: number;
+  rarity: string;
+}
+
+// An Item, once inside a Cell, becomes a Slot
+export interface Slot extends Item {
+  forceAdjusted?: boolean;
+  isAdjusted?: boolean;
+  quantity?: number;
+  isDuplicate?: true;
+  originalIndex?: number;
+  userSubstituted?: true;
+}
+
+// A Slot with extra data for redstone signal optimization
+export interface OptimizedSlot extends Slot {
+  originalIndex: number;
+  quantity: number;
+  isDuplicate?: true;
+}
+
+// Color of an Item
+export interface Color {
+  rgb: [number, number, number];
+  hsl: [number, number, number];
+  hex: string;
+}
+
+// Player stats imported from a Minecraft save
+export interface PlayerStats {
+  mined: Dictionary<number>;
+  crafted: Dictionary<number>;
+  used: Dictionary<number>;
+  picked_up: Dictionary<number>;
+  dropped: Dictionary<number>;
+}
+
+// Slots that have been selected through ctrl or shift clicking
+// Mostly used for dragging items around
+export interface SelectedSlot {
+  cellId: number;
+  slotIndex: number;
+}
+
+// Data for handling dragged items
+export type DraggedSlot =
+  // One item is being dragged
+  | {
+      cellId: number;
+      slotIndex: number;
+      item: Item;
+      multiSelect?: false;
+    }
+  // Several items are being dragged
+  | {
+      cellId: number;
+      slotIndex: number;
+      item: unknown;
+      multiSelect: true;
+      selectedSlots: SelectedSlot[]; // TODO: Get rid of multiSelect and instead simply check whether selectedSlots contains something
+    };
 
 function HueRangePicker({
   hueRange,
@@ -18,19 +109,27 @@ function HueRangePicker({
   onHueChange,
   onSatChange,
   onLumChange,
-}) {
+}: HueRangePickerProps) {
   const size = 180;
   const thickness = 25;
   const radius = (size - thickness) / 2;
   const centerX = size / 2;
   const centerY = size / 2;
 
-  const handleHueMouseDown = (e, isStart) => {
+  const handleHueMouseDown = (
+    e: React.MouseEvent<SVGCircleElement, MouseEvent>,
+    isStart: boolean
+  ) => {
     e.preventDefault();
-    const svg = e.currentTarget.closest("svg");
+    const svg = e.currentTarget?.closest("svg");
+    if (svg == null) throw new Error("svg element not found");
+
     const rect = svg.getBoundingClientRect();
 
-    const handleMouseMove = (moveEvent) => {
+    const handleMouseMove = (moveEvent: {
+      clientX: number;
+      clientY: number;
+    }) => {
       const x = moveEvent.clientX - rect.left - centerX;
       const y = moveEvent.clientY - rect.top - centerY;
       let angle = Math.atan2(y, x) * (180 / Math.PI);
@@ -53,7 +152,7 @@ function HueRangePicker({
     document.addEventListener("mouseup", handleMouseUp);
   };
 
-  const getCoords = (angle) => {
+  const getCoords = (angle: number) => {
     const rad = (angle - 90) * (Math.PI / 180);
     return {
       x: centerX + radius * Math.cos(rad),
@@ -102,8 +201,13 @@ function HueRangePicker({
             onMouseDown={(e) => {
               e.preventDefault();
               const container = e.currentTarget.parentElement;
+              if (container == null) throw new Error("parentElement is null");
+
               const rect = container.getBoundingClientRect();
-              const handleMove = (moveEvent) => {
+              const handleMove = (moveEvent: {
+                clientX: number;
+                clientY: number;
+              }) => {
                 const y = Math.max(
                   0,
                   Math.min(rect.height, moveEvent.clientY - rect.top)
@@ -138,8 +242,13 @@ function HueRangePicker({
             onMouseDown={(e) => {
               e.preventDefault();
               const container = e.currentTarget.parentElement;
+              if (container == null) throw new Error("parentElement is null");
+
               const rect = container.getBoundingClientRect();
-              const handleMove = (moveEvent) => {
+              const handleMove = (moveEvent: {
+                clientX: number;
+                clientY: number;
+              }) => {
                 const y = Math.max(
                   0,
                   Math.min(rect.height, moveEvent.clientY - rect.top)
@@ -292,8 +401,13 @@ function HueRangePicker({
             onMouseDown={(e) => {
               e.preventDefault();
               const container = e.currentTarget.parentElement;
+              if (container == null) throw new Error("parentElement is null");
+
               const rect = container.getBoundingClientRect();
-              const handleMove = (moveEvent) => {
+              const handleMove = (moveEvent: {
+                clientX: number;
+                clientY: number;
+              }) => {
                 const y = Math.max(
                   0,
                   Math.min(rect.height, moveEvent.clientY - rect.top)
@@ -328,8 +442,13 @@ function HueRangePicker({
             onMouseDown={(e) => {
               e.preventDefault();
               const container = e.currentTarget.parentElement;
+              if (container == null) throw new Error("parentElement is null");
+
               const rect = container.getBoundingClientRect();
-              const handleMove = (moveEvent) => {
+              const handleMove = (moveEvent: {
+                clientX: number;
+                clientY: number;
+              }) => {
                 const y = Math.max(
                   0,
                   Math.min(rect.height, moveEvent.clientY - rect.top)
@@ -356,13 +475,13 @@ function HueRangePicker({
 }
 
 export default function MinecraftItemBuilder() {
-  const [catalogueItems, setCatalogueItems] = useState([]);
-  const [cells, setCells] = useState(() => {
+  const [catalogueItems, setCatalogueItems] = useState<Item[]>([]);
+  const [cells, setCells] = useState<Cell[]>(() => {
     const saved = localStorage.getItem("minecraftBuilder_cells");
     if (saved) {
       const parsedCells = JSON.parse(saved);
       // Migrate old 50-slot cells to 54-slot cells
-      return parsedCells.map((cell) => {
+      return parsedCells.map((cell: Cell) => {
         if (cell.slots.length === 50) {
           // Add 4 more null slots to make it 54
           return { ...cell, slots: [...cell.slots, null, null, null, null] };
@@ -372,23 +491,30 @@ export default function MinecraftItemBuilder() {
     }
     return [{ id: 1, slots: Array(54).fill(null) }];
   });
-  const [draggedItem, setDraggedItem] = useState(null);
-  const [draggedSlot, setDraggedSlot] = useState(null);
-  const [draggedCell, setDraggedCell] = useState(null);
-  const [dragOverSlot, setDragOverSlot] = useState(null);
+
+  const [draggedItem, setDraggedItem] = useState<{
+    item: Item;
+    source: { type: unknown };
+  } | null>(null);
+  const [draggedSlot, setDraggedSlot] = useState<DraggedSlot | null>(null);
+  const [draggedCell, setDraggedCell] = useState<number | null>(null);
+  const [dragOverSlot, setDragOverSlot] = useState<string | null>(null);
+
+  // TODO: Why not use cells.length instead?
   const [nextCellId, setNextCellId] = useState(() => {
     const saved = localStorage.getItem("minecraftBuilder_nextCellId");
     return saved ? parseInt(saved, 10) : 2;
   });
+
   const [searchTerm, setSearchTerm] = useState("");
   const [loading, setLoading] = useState(true);
   const [showColorPicker, setShowColorPicker] = useState(false);
-  const [hueRange, setHueRange] = useState([0, 360]);
-  const [satRange, setSatRange] = useState([0, 100]);
-  const [lumRange, setLumRange] = useState([0, 100]);
+  const [hueRange, setHueRange] = useState<[number, number]>([0, 360]);
+  const [satRange, setSatRange] = useState<[number, number]>([0, 100]);
+  const [lumRange, setLumRange] = useState<[number, number]>([0, 100]);
   const [moveAllMode, setMoveAllMode] = useState(false);
   const [displayMode, setDisplayMode] = useState(false); // false = normal, true = redstone optimization
-  const [playerStats, setPlayerStats] = useState(() => {
+  const [playerStats, setPlayerStats] = useState<PlayerStats>(() => {
     const saved = localStorage.getItem("minecraftBuilder_playerStats");
     return saved ? JSON.parse(saved) : null;
   }); // Player statistics from imported JSON
@@ -396,19 +522,25 @@ export default function MinecraftItemBuilder() {
     const saved = localStorage.getItem("minecraftBuilder_statsSortMode");
     return saved ? saved : "none";
   }); // 'none', 'used', 'crafted', 'acquired'
-  const [statsPercentRange, setStatsPercentRange] = useState([null, 100]); // Percentage range filter for stats (null = include all, 0-100 = only items with stats)
-  const [selectedSlots, setSelectedSlots] = useState([]); // Array of {cellId, slotIndex}
-  const [lastSelectedSlot, setLastSelectedSlot] = useState(null); // For shift-click range selection
-  const [dragOverCell, setDragOverCell] = useState(null); // Track which cell is being dragged over
+  const [statsPercentRange, setStatsPercentRange] = useState<
+    [number | null, number]
+  >([null, 100]); // Percentage range filter for stats (null = include all, 0-100 = only items with stats)
+  const [selectedSlots, setSelectedSlots] = useState<SelectedSlot[]>([]); // Array of {cellId, slotIndex}
+  const [lastSelectedSlot, setLastSelectedSlot] = useState<SelectedSlot | null>(
+    null
+  ); // For shift-click range selection
+  const [dragOverCell, setDragOverCell] = useState<number | null>(null); // Track which cell is being dragged over
   const [categoryFilter, setCategoryFilter] = useState("");
   const [groupFilter, setGroupFilter] = useState("");
   const [materialFilter, setMaterialFilter] = useState("");
-  const [stackSizeFilters, setStackSizeFilters] = useState({
-    1: false,
-    16: false,
-    64: false,
-  });
-  const [rarityFilters, setRarityFilters] = useState({
+  const [stackSizeFilters, setStackSizeFilters] = useState<Dictionary<boolean>>(
+    {
+      1: false,
+      16: false,
+      64: false,
+    }
+  );
+  const [rarityFilters, setRarityFilters] = useState<Dictionary<boolean>>({
     common: false,
     uncommon: false,
     rare: false,
@@ -419,42 +551,48 @@ export default function MinecraftItemBuilder() {
   const [showMaterialSuggestions, setShowMaterialSuggestions] = useState(false);
   const [catalogueWidth, setCatalogueWidth] = useState(400); // Width in pixels
   const [isDraggingDivider, setIsDraggingDivider] = useState(false);
-  const [history, setHistory] = useState([]); // Store last 10 cell states for undo
+  const [history, setHistory] = useState<Cell[][]>([]); // Store last 10 cell states for undo
   const [useRegex, setUseRegex] = useState(false);
   // Load items from JSON file
   useEffect(() => {
-    fetch("items.json?v=" + Date.now())
+    fetch("items.json?v=" + Date.now()) // TODO: Is putting the current date in the URL really necessary?
       .then((response) => response.json())
       .then((data) => {
         // Parse category and group fields from string representations to actual arrays
-        const processedData = data.map((item) => {
-          const processed = { ...item };
+        // TODO: Why are those fields in items.json not arrays already? What's preventing us from doing this ahead of time?
+        const processedData = data.map(
+          (item: {
+            category: string | unknown[];
+            group: string | unknown[];
+          }) => {
+            const processed = { ...item };
 
-          // Parse category if it's a string representation of an array
-          if (typeof item.category === "string") {
-            try {
-              // Convert Python-style list string to JSON array string
-              //  we should probably change the json file to have actuall json array and not a string array
-              const jsonStr = item.category.replace(/'/g, '"');
-              processed.category = JSON.parse(jsonStr);
-            } catch (_e) {
-              processed.category = [];
+            // Parse category if it's a string representation of an array
+            if (typeof item.category === "string") {
+              try {
+                // Convert Python-style list string to JSON array string
+                //  we should probably change the json file to have actuall json array and not a string array
+                const jsonStr = item.category.replace(/'/g, '"');
+                processed.category = JSON.parse(jsonStr);
+              } catch (_e) {
+                processed.category = [];
+              }
             }
-          }
 
-          // Parse group if it's a string representation of an array
-          if (typeof item.group === "string") {
-            try {
-              // Convert Python-style list string to JSON array string
-              const jsonStr = item.group.replace(/'/g, '"');
-              processed.group = JSON.parse(jsonStr);
-            } catch (_e) {
-              processed.group = [];
+            // Parse group if it's a string representation of an array
+            if (typeof item.group === "string") {
+              try {
+                // Convert Python-style list string to JSON array string
+                const jsonStr = item.group.replace(/'/g, '"');
+                processed.group = JSON.parse(jsonStr);
+              } catch (_e) {
+                processed.group = [];
+              }
             }
-          }
 
-          return processed;
-        });
+            return processed;
+          }
+        );
 
         setCatalogueItems(processedData);
 
@@ -462,16 +600,21 @@ export default function MinecraftItemBuilder() {
         if (savedCells) {
           try {
             const parsedCells = JSON.parse(savedCells);
-            const restoredCells = parsedCells.map((cell) => ({
-              ...cell,
-              slots: cell.slots.map((slot) => {
-                if (!slot || !slot.id) return null;
-                // Match item by id from catalogue
-                return (
-                  processedData.find((item) => item.id === slot.id) || null
-                );
-              }),
-            }));
+            const restoredCells = parsedCells.map(
+              (cell: { slots: unknown[] }) => ({
+                ...cell,
+                slots: cell.slots.map((slot) => {
+                  if (!slot || typeof slot !== "object" || !("id" in slot))
+                    return null;
+                  // Match item by id from catalogue
+                  return (
+                    processedData.find(
+                      (item: { id: string }) => item.id === slot.id
+                    ) || null
+                  );
+                }),
+              })
+            );
             setCells(restoredCells);
           } catch (e) {
             console.error("Error restoring cells:", e);
@@ -515,7 +658,7 @@ export default function MinecraftItemBuilder() {
 
   // Handle divider dragging
   useEffect(() => {
-    const handleMouseMove = (e) => {
+    const handleMouseMove = (e: { clientX: number }) => {
       if (isDraggingDivider) {
         const newWidth = e.clientX;
         if (newWidth >= 300 && newWidth <= 800) {
@@ -550,9 +693,9 @@ export default function MinecraftItemBuilder() {
 
   // Calculate tag suggestions (only include tags that appear on more than 2 items)
   const tagSuggestions = useMemo(() => {
-    const categoryCounts = {};
-    const groupCounts = {};
-    const materialCounts = {};
+    const categoryCounts: Dictionary<number> = {};
+    const groupCounts: Dictionary<number> = {};
+    const materialCounts: Dictionary<number> = {};
 
     catalogueItems.forEach((item) => {
       // Category and group are now arrays
@@ -575,13 +718,13 @@ export default function MinecraftItemBuilder() {
 
     return {
       categories: Object.keys(categoryCounts)
-        .filter((cat) => categoryCounts[cat] > 2)
+        .filter((cat) => categoryCounts[cat] ?? 0 > 2)
         .sort(),
       groups: Object.keys(groupCounts)
-        .filter((grp) => groupCounts[grp] > 2)
+        .filter((grp) => groupCounts[grp] ?? 0 > 2)
         .sort(),
       materials: Object.keys(materialCounts)
-        .filter((mat) => materialCounts[mat] > 1)
+        .filter((mat) => materialCounts[mat] ?? 0 > 1)
         .sort(),
     };
   }, [catalogueItems]);
@@ -774,7 +917,7 @@ export default function MinecraftItemBuilder() {
         //   - 0-100 shows all items
         //   - 50-100 shows top half (best items)
         //   - 0-50 shows bottom half (worst items)
-        const mapPercentile = (linearPercent) => {
+        const mapPercentile = (linearPercent: number) => {
           if (linearPercent === 0) return 0;
           if (linearPercent === 100) return 100;
           // Use exponential curve: y = (e^(x/k) - 1) / (e^(100/k) - 1) * 100
@@ -788,10 +931,10 @@ export default function MinecraftItemBuilder() {
         // Map slider percentages (rank) to array indices (inverted because array is best-first)
         // null means include all items from the bottom
         const mappedMinRank =
-          statsPercentRange[0] === null
+          statsPercentRange[0] == null
             ? 0
             : mapPercentile(statsPercentRange[0]); // 0-100 rank
-        const mappedMaxRank = mapPercentile(statsPercentRange[1]); // 0-100 rank
+        const mappedMaxRank = mapPercentile(statsPercentRange[1] ?? 100); // 0-100 rank
 
         // Convert rank to index: rank 0 = last index (worst), rank 100 = index 0 (best)
         // minIndex should be the WORSE of the two bounds (higher index)
@@ -828,10 +971,12 @@ export default function MinecraftItemBuilder() {
   // Save current state to history (keep last 10)
   const saveToHistory = () => {
     // Efficient shallow clone of cells
-    const cellsSnapshot = cells.map((cell) => ({
-      ...cell,
-      slots: [...cell.slots],
-    }));
+    const cellsSnapshot = cells.map(
+      (cell): Cell => ({
+        ...cell,
+        slots: [...cell.slots],
+      })
+    );
 
     const newHistory = [...history, cellsSnapshot];
     if (newHistory.length > 10) {
@@ -842,16 +987,15 @@ export default function MinecraftItemBuilder() {
 
   // Undo the last action
   const undo = () => {
-    if (history.length > 0) {
-      const previousState = history[history.length - 1];
-      setCells(previousState);
-      setHistory(history.slice(0, -1)); // Remove the state we just restored
-    }
+    const previousState = history.at(-1);
+    if (previousState == null) return;
+    setCells(previousState);
+    setHistory(history.slice(0, -1)); // Remove the state we just restored
   };
 
   // Ctrl+Z handler
   useEffect(() => {
-    const handleKeyDown = (e) => {
+    const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "z") {
         e.preventDefault();
         undo();
@@ -864,8 +1008,8 @@ export default function MinecraftItemBuilder() {
 
   // Auto-scroll when dragging near viewport edges or outside window
   useEffect(() => {
-    let scrollInterval = null;
-    let lastMouseY = null;
+    let scrollInterval: NodeJS.Timeout | null = null;
+    let lastMouseY: number | null = null;
     let isOutsideWindow = false;
 
     const updateScroll = () => {
@@ -917,7 +1061,7 @@ export default function MinecraftItemBuilder() {
       }
     };
 
-    const handleMouseMove = (e) => {
+    const handleMouseMove = (e: MouseEvent) => {
       lastMouseY = e.clientY;
       isOutsideWindow = false;
       updateScroll();
@@ -964,14 +1108,14 @@ export default function MinecraftItemBuilder() {
     setNextCellId(nextCellId + 1);
   };
 
-  const removeCell = (cellId) => {
+  const removeCell = (cellId: number) => {
     saveToHistory();
     setCells(cells.filter((c) => c.id !== cellId));
   };
 
   // Export cells to JSON (Litematica material list format)
   const exportCells = () => {
-    const items = [];
+    const items: { id: string; count: number; cell: number }[] = [];
 
     cells.forEach((cell, cellIndex) => {
       cell.slots.forEach((slot) => {
@@ -1004,14 +1148,17 @@ export default function MinecraftItemBuilder() {
   };
 
   // Import cells from JSON (supports both old array format and new Litematica format)
-  const importCells = (event) => {
-    const file = event.target.files[0];
+  const importCells = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const importData = JSON.parse(e.target.result);
+        const result = e.target?.result;
+        if (typeof result !== "string")
+          throw new Error("FileReader.result is not a string");
+        const importData = JSON.parse(result);
 
         let newCells = [];
 
@@ -1019,34 +1166,39 @@ export default function MinecraftItemBuilder() {
         if (importData.items && Array.isArray(importData.items)) {
           // New Litematica format: {name: "...", items: [{id, count, cell}, ...]}
           // Group items by cell
-          const cellMap = new Map();
+          const cellMap = new Map<number, Item[]>();
 
-          importData.items.forEach((item) => {
-            const cellIndex = item.cell ?? 0;
-            if (!cellMap.has(cellIndex)) {
-              cellMap.set(cellIndex, []);
-            }
+          importData.items.forEach(
+            (item: { cell: number; id: string; count: any }) => {
+              const cellIndex = item.cell ?? 0;
+              if (!cellMap.has(cellIndex)) {
+                cellMap.set(cellIndex, []);
+              }
 
-            // Find the item in catalogue by id
-            const catalogueItem = catalogueItems.find((i) => i.id === item.id);
-            if (catalogueItem) {
-              // Create a copy with the quantity from the import
-              const itemWithQuantity = {
-                ...catalogueItem,
-                quantity: item.count,
-              };
-              cellMap.get(cellIndex).push(itemWithQuantity);
+              // Find the item in catalogue by id
+              const catalogueItem = catalogueItems.find(
+                (i) => i.id === item.id
+              );
+              if (catalogueItem) {
+                // Create a copy with the quantity from the import
+                const itemWithQuantity = {
+                  ...catalogueItem,
+                  quantity: item.count,
+                };
+                cellMap.get(cellIndex)?.push(itemWithQuantity);
+              }
             }
-          });
+          );
 
           // Convert cell map to array of cells
+          // TODO: Use Array.from(cellMap, ([key, value]) => ...) instead
           const maxCellIndex = Math.max(...cellMap.keys());
           for (let i = 0; i <= maxCellIndex; i++) {
             const cellItems = cellMap.get(i) || [];
             const slots = Array(54).fill(null);
 
             // Fill slots starting from slot 1 (slot 0 is reserved)
-            cellItems.forEach((item, index) => {
+            cellItems.forEach((item: unknown, index: number) => {
               if (index + 1 < 54) {
                 slots[index + 1] = item;
               }
@@ -1060,7 +1212,7 @@ export default function MinecraftItemBuilder() {
         } else if (Array.isArray(importData)) {
           // Old array format: [[itemId, itemId, ...], ...]
           newCells = importData.map((cellData, index) => {
-            const slots = cellData.map((itemId) => {
+            const slots = cellData.map((itemId: string | null) => {
               if (itemId === null) return null;
               // Find the item in catalogue by id
               const item = catalogueItems.find((i) => i.id === itemId);
@@ -1102,7 +1254,8 @@ export default function MinecraftItemBuilder() {
         setSelectedSlots([]);
         setLastSelectedSlot(null);
       } catch (error) {
-        alert("Error parsing file: " + error.message);
+        if (error instanceof Error)
+          alert("Error parsing file: " + error.message);
       }
     };
     reader.readAsText(file);
@@ -1112,18 +1265,22 @@ export default function MinecraftItemBuilder() {
   };
 
   // Import player statistics from JSON
-  const importStats = (event) => {
-    const file = event.target.files[0];
+  const importStats = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
     if (!file) return;
 
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
-        const stats = JSON.parse(e.target.result);
+        const result = e.target?.result;
+        if (typeof result !== "string")
+          throw new Error("FileReader.result is not a string");
+        const stats = JSON.parse(result);
         setPlayerStats(stats);
         alert("Player statistics imported successfully!");
       } catch (error) {
-        alert("Error parsing stats file: " + error.message);
+        if (error instanceof Error)
+          alert("Error parsing stats file: " + error.message);
       }
     };
     reader.readAsText(file);
@@ -1132,22 +1289,15 @@ export default function MinecraftItemBuilder() {
     event.target.value = "";
   };
 
-  // Calculate "acquired" score: picked_up - dropped
-  // Higher score = player wants to keep the item
-  const calculateAcquiredScore = (itemId) => {
-    if (!playerStats) return 0;
-
-    const pickedUp = playerStats.picked_up?.[itemId] || 0;
-    const dropped = playerStats.dropped?.[itemId] || 0;
-
-    return pickedUp - dropped;
-  };
-
   // Slot selection handler
-  const handleSlotClick = (e, cellId, slotIndex, item) => {
+  const handleSlotClick = (
+    e: React.MouseEvent<HTMLDivElement, MouseEvent>,
+    cellId: number,
+    slotIndex: number,
+    item: unknown
+  ) => {
     if (!item) return; // Can't select empty slots
 
-    const slotKey = `${cellId}-${slotIndex}`;
     const isAlreadySelected = selectedSlots.some(
       (s) => s.cellId === cellId && s.slotIndex === slotIndex
     );
@@ -1159,8 +1309,9 @@ export default function MinecraftItemBuilder() {
 
       const rangeSelection = [];
       const cell = cells.find((c) => c.id === cellId);
+      // TODO: Use cell.slots.slice()
       for (let i = startIndex; i <= endIndex; i++) {
-        if (cell.slots[i]) {
+        if (cell?.slots[i]) {
           // Only select filled slots
           rangeSelection.push({ cellId, slotIndex: i });
         }
@@ -1199,7 +1350,11 @@ export default function MinecraftItemBuilder() {
   };
 
   // Item drag handlers
-  const handleItemDragStart = (e, item, source) => {
+  const handleItemDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    item: Item,
+    source: (SelectedSlot & { type: "slot" }) | { type: "catalogue" } // TODO: Ugly. Split this up in 2 different handlers.
+  ) => {
     if (source.type === "catalogue") {
       setDraggedItem({ item, source });
     } else if (source.type === "slot") {
@@ -1232,13 +1387,17 @@ export default function MinecraftItemBuilder() {
     e.dataTransfer.setData("text/plain", ""); // Improves drag performance
   };
 
-  const handleItemDragEnd = (e) => {
+  const handleItemDragEnd = (_: unknown) => {
     setDraggedItem(null);
     setDraggedSlot(null);
     setDragOverSlot(null);
   };
 
-  const handleItemDragOver = (e, cellId, slotIndex) => {
+  const handleItemDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    cellId: number,
+    slotIndex: unknown
+  ) => {
     // Skip if we're dragging a cell (not an item)
     if (draggedCell) {
       e.stopPropagation(); // Prevent event from bubbling to cell
@@ -1255,11 +1414,14 @@ export default function MinecraftItemBuilder() {
     }
   };
 
-  const handleItemDragLeave = (e) => {
+  const handleItemDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
     // Skip if we're dragging a cell (not an item)
     if (draggedCell) {
       return;
     }
+
+    if (!(e.relatedTarget instanceof Node))
+      throw Error("Event's relatedTarget is not a Node");
 
     // Only clear if we're actually leaving (not entering a child)
     if (!e.currentTarget.contains(e.relatedTarget)) {
@@ -1267,23 +1429,28 @@ export default function MinecraftItemBuilder() {
     }
   };
 
-  const handleItemDrop = (e, cellId, slotIndex) => {
+  const handleItemDrop = (
+    e: React.DragEvent<HTMLDivElement>,
+    cellId: number,
+    slotIndex: number
+  ) => {
     // Skip if we're dragging a cell (not an item)
     if (draggedCell) {
       return;
     }
 
     e.preventDefault();
-    e.stopPropagation(); // Stop event from bubbling to cell drop handler
+    e.stopPropagation(); // Stop event from bubbling to cell drop handlerz
     setDragOverSlot(null);
 
     // Handle displayMode substitution
     if (displayMode && draggedSlot) {
       const targetCell = cells.find((c) => c.id === cellId);
+      if (targetCell == null) throw Error("targetCell not found");
 
       // Only allow substitution within the same cell
       if (draggedSlot.cellId === cellId) {
-        const displaySlots = optimizeForRedstone(targetCell.slots);
+        const displaySlots = optimizeForRedstone(targetCell?.slots);
         const targetItem = displaySlots[slotIndex];
 
         // Check if dropping on an adjusted item
@@ -1303,8 +1470,6 @@ export default function MinecraftItemBuilder() {
 
     saveToHistory(); // Save state before making changes
 
-    const targetSlot = cells.find((c) => c.id === cellId).slots[slotIndex];
-
     if (draggedItem && draggedItem.source.type === "catalogue") {
       // Dragging from catalogue - always INSERT (displace items)
       if (moveAllMode) {
@@ -1316,13 +1481,14 @@ export default function MinecraftItemBuilder() {
               let itemIndex = 0;
 
               // Start at i = 1 to skip reserved slot 0
+              // TODO: Use for (const slot of newSlots.slice(1))
               for (
                 let i = 1;
                 i < newSlots.length && itemIndex < availableItems.length;
                 i++
               ) {
                 if (newSlots[i] === null) {
-                  newSlots[i] = availableItems[itemIndex];
+                  newSlots[i] = availableItems[itemIndex] ?? null;
                   itemIndex++;
                 }
               }
@@ -1346,8 +1512,9 @@ export default function MinecraftItemBuilder() {
 
               // Insert at the target position, shifting everything right
               // Shift items from the end backwards to make room
+              // Use newSlots.splice()
               for (let i = 53; i > slotIndex; i--) {
-                newSlots[i] = newSlots[i - 1];
+                newSlots[i] = newSlots[i - 1] ?? null;
               }
 
               // Place the new item at the target slot
@@ -1365,7 +1532,11 @@ export default function MinecraftItemBuilder() {
     } else if (draggedSlot) {
       if (draggedSlot.multiSelect) {
         // Dragging multiple selected items
-        const itemsToMove = [];
+        const itemsToMove: {
+          item: Item;
+          sourceCellId: unknown;
+          sourceSlotIndex: number;
+        }[] = [];
 
         // Collect items from selected slots (sorted by slot index)
         const sortedSelection = [...draggedSlot.selectedSlots].sort((a, b) => {
@@ -1375,17 +1546,15 @@ export default function MinecraftItemBuilder() {
 
         sortedSelection.forEach((slot) => {
           const sourceCell = cells.find((c) => c.id === slot.cellId);
-          if (sourceCell && sourceCell.slots[slot.slotIndex]) {
+          const itemToMove = sourceCell?.slots[slot.slotIndex];
+          if (sourceCell && itemToMove) {
             itemsToMove.push({
-              item: sourceCell.slots[slot.slotIndex],
+              item: itemToMove,
               sourceCellId: slot.cellId,
               sourceSlotIndex: slot.slotIndex,
             });
           }
         });
-
-        // Find the target cell and use the drop target slot as insertion point
-        const targetCell = cells.find((c) => c.id === cellId);
 
         // Check if we're moving within the same cell
         const isSameCell = itemsToMove.every(
@@ -1414,6 +1583,7 @@ export default function MinecraftItemBuilder() {
 
                 // Step 2: Create array without selected items and compact it
                 const remainingItems = [];
+                // TODO: use newSlots.filter()
                 for (let i = 1; i < 54; i++) {
                   if (!selectedIndices.includes(i) && newSlots[i] !== null) {
                     remainingItems.push(newSlots[i]);
@@ -1425,10 +1595,10 @@ export default function MinecraftItemBuilder() {
                 // So count non-selected items that will be BEFORE the drop position in final arrangement
                 // This means: items before drop slot, OR items at drop slot if we're inserting after them
                 let insertPosition = 0;
-                const isTargetBeforeSelection = slotIndex < selectedIndices[0];
                 const isTargetAfterSelection =
-                  slotIndex > selectedIndices[selectedIndices.length - 1];
+                  slotIndex > (selectedIndices.at(-1) ?? 0);
 
+                // TODO: I think this is basically insertPosition = Min(slotIndex - 1, remainingItems.length) plus or minus 1
                 for (let i = 1; i < slotIndex; i++) {
                   if (!selectedIndices.includes(i) && newSlots[i] !== null) {
                     insertPosition++;
@@ -1445,6 +1615,7 @@ export default function MinecraftItemBuilder() {
                 }
 
                 // Step 4: Insert selected items at the calculated position
+                // TODO: Just put the null at the beginning here...
                 const finalItems = [
                   ...remainingItems.slice(0, insertPosition),
                   ...selectedItems,
@@ -1452,7 +1623,8 @@ export default function MinecraftItemBuilder() {
                 ];
 
                 // Step 5: Build final 54-slot array
-                const finalSlots = [null]; // Slot 0
+                // TODO: ...then finalItems.slice(0,54) if you think it might be too big
+                const finalSlots: (Item | null)[] = [null]; // Slot 0
                 for (let i = 0; i < 53; i++) {
                   finalSlots.push(finalItems[i] || null);
                 }
@@ -1476,6 +1648,7 @@ export default function MinecraftItemBuilder() {
                 let insertIndex = Math.max(0, slotIndex - 1);
                 // Adjust if some slots before target were null
                 let nullsBefore = 0;
+                // TODO: nullsBefore = cell.slots.slice(0, slotIndex).filter((item) => item === null).length
                 for (let i = 1; i < slotIndex && i < cell.slots.length; i++) {
                   if (cell.slots[i] === null) nullsBefore++;
                 }
@@ -1491,13 +1664,15 @@ export default function MinecraftItemBuilder() {
                 }
 
                 // Step 5: Insert moved items at insertion point
-                const finalSlots = [
+                const finalSlots: (Item | null)[] = [
                   ...compacted.slice(0, insertIndex),
                   ...itemsToMove.map((item) => item.item),
                   ...compacted.slice(insertIndex),
                 ];
 
                 // Pad with nulls
+                // TODO: Use finalSlots.concat(Array(Math.max(53 - finalSlots.length, 0)).fill(null))
+                //       Maybe even make a pad() function out of that?
                 while (finalSlots.length < 53) {
                   finalSlots.push(null);
                 }
@@ -1515,9 +1690,11 @@ export default function MinecraftItemBuilder() {
               });
 
               // Compact slots 1-53, preserve slot 0
-              const compacted = newSlots
+              const compacted: (Item | null)[] = newSlots
                 .slice(1)
                 .filter((slot) => slot !== null);
+
+              // TODO: compacted.concat(Array(53 - compacted.length).fill(null))
               while (compacted.length < 53) {
                 compacted.push(null);
               }
@@ -1535,7 +1712,7 @@ export default function MinecraftItemBuilder() {
 
         setCells(
           cells.map((cell) => {
-            let newSlots = [...cell.slots];
+            const newSlots = [...cell.slots];
 
             if (isSameCell && cell.id === cellId) {
               // Moving within same cell - same logic as catalogue drop
@@ -1553,32 +1730,24 @@ export default function MinecraftItemBuilder() {
               }
 
               // Save the item being moved
-              const item = newSlots[sourceIndex];
+              const item = newSlots[sourceIndex] ?? null;
 
               // Create a clean copy without the source item
-              const slotsWithoutSource = [];
+              const slotsWithoutSource: (Item | null)[] = [];
+              // TODO: newSlots.splice(sourceIndex, 1)
               for (let i = 0; i < 54; i++) {
                 if (i !== sourceIndex) {
-                  slotsWithoutSource.push(newSlots[i]);
+                  slotsWithoutSource.push(newSlots[i] ?? null);
                 }
               }
               // Now slotsWithoutSource has 53 elements
 
               // Build final array by inserting at target position
-              const finalSlots = [];
-
-              // Add everything before target
-              for (let i = 0; i < targetIndex; i++) {
-                finalSlots.push(slotsWithoutSource[i]);
-              }
-
-              // Insert the item at target
-              finalSlots.push(item);
-
-              // Add everything from target onwards
-              for (let i = targetIndex; i < 53; i++) {
-                finalSlots.push(slotsWithoutSource[i]);
-              }
+              const finalSlots = [
+                ...slotsWithoutSource.slice(0, targetIndex), // Add everything before target
+                item, // Insert the item at target
+                ...slotsWithoutSource.slice(targetIndex), // Add everything from target onwards
+              ].slice(0, 54);
 
               // Ensure slot 0 is null
               finalSlots[0] = null;
@@ -1595,18 +1764,17 @@ export default function MinecraftItemBuilder() {
                 return cell;
               }
 
-              // Shift items from the end backwards to make room
-              for (let i = 53; i > slotIndex; i--) {
-                newSlots[i] = newSlots[i - 1];
-              }
-
               // Place the item at the target slot
-              newSlots[slotIndex] = draggedSlot.item;
+              const finalSlots = [
+                ...newSlots.slice(0, slotIndex),
+                draggedSlot.item,
+                ...newSlots.slice(slotIndex),
+              ].slice(0, 54);
 
               // Ensure slot 0 is null
-              newSlots[0] = null;
+              finalSlots[0] = null;
 
-              return { ...cell, slots: newSlots };
+              return { ...cell, slots: finalSlots };
             }
 
             return cell;
@@ -1621,7 +1789,7 @@ export default function MinecraftItemBuilder() {
 
   // Calculate redstone signal strength for a container
   // Based on: floor(14/inv_size * reduce(items, (item:1)/min(64, stack_limit(item:0)) + _a, 0) + min(1, length(items)))
-  const calculateSignalStrength = (slots) => {
+  const calculateSignalStrength = (slots: (Slot | null)[]) => {
     const invSize = 54;
     const items = slots.filter((item) => item !== null);
 
@@ -1637,14 +1805,13 @@ export default function MinecraftItemBuilder() {
   };
 
   // Optimize container to ensure adding one more item increments signal strength
-  const optimizeForRedstone = (slots) => {
-    const invSize = 54;
-    const items = slots.slice(1).filter((item) => item !== null); // Skip slot 0
-
-    if (items.length === 0) return slots;
+  const optimizeForRedstone = (
+    slots: (Slot | null)[]
+  ): (OptimizedSlot | null)[] => {
+    if (slots.every((x) => x == null)) return slots;
 
     // Always use the simpler logic: items are adjusted if they have quantity > 1 OR multiple instances exist
-    let optimizedSlots = slots.map((item, idx) =>
+    let optimizedSlots: (OptimizedSlot | null)[] = slots.map((item, idx) =>
       item
         ? { ...item, quantity: item.quantity || 1, originalIndex: idx }
         : null
@@ -1652,22 +1819,25 @@ export default function MinecraftItemBuilder() {
     let currentSignal = calculateSignalStrength(optimizedSlots);
 
     // Count occurrences of each item ID
-    const itemCounts = {};
+    const itemCounts: Dictionary<number> = {};
+    // TODO: use for(const item of optimizedSlots) or maybe even optimizedSlots.reduce()?
     for (let i = 1; i < optimizedSlots.length; i++) {
-      if (optimizedSlots[i]) {
-        itemCounts[optimizedSlots[i].id] =
-          (itemCounts[optimizedSlots[i].id] || 0) + 1;
+      const item = optimizedSlots[i];
+      if (item) {
+        itemCounts[item.id] = (itemCounts[item.id] || 0) + 1;
       }
     }
 
     // Mark items that are already adjusted (have quantity > 1 OR multiple instances)
     // These are items we want to preserve from substitution
+    // TODO: for(const item of optimizedSlots.filter((item) => item != null))
     for (let i = 1; i < optimizedSlots.length; i++) {
-      if (optimizedSlots[i]) {
-        const hasMultipleInstances = itemCounts[optimizedSlots[i].id] > 1;
-        const hasQuantity = (optimizedSlots[i].quantity || 1) > 1;
+      const item = optimizedSlots[i];
+      if (item) {
+        const hasMultipleInstances = itemCounts[item.id] ?? 0 > 1;
+        const hasQuantity = (item.quantity || 1) > 1;
         if (hasQuantity || hasMultipleInstances) {
-          optimizedSlots[i].forceAdjusted = true;
+          item.forceAdjusted = true;
         }
       }
     }
@@ -1685,9 +1855,11 @@ export default function MinecraftItemBuilder() {
     // If we don't have quantity adjustments AND no user substitutions, mark ALL items as candidates
     if (!hasQuantityAdjustments && !hasUserSubstituted) {
       // Mark ALL items as candidates for adjustment
+      // TODO: for(const item of optimizedSlots.filter((item) => item != null))
       for (let i = optimizedSlots.length - 1; i >= 1; i--) {
-        if (optimizedSlots[i]) {
-          optimizedSlots[i].forceAdjusted = true;
+        const item = optimizedSlots[i];
+        if (item) {
+          item.forceAdjusted = true;
         }
       }
     }
@@ -1698,28 +1870,37 @@ export default function MinecraftItemBuilder() {
       (item) => item && item.forceAdjusted === true
     );
     const hasUnstackable = forcedItems.some(
-      (item) => (item.stack_size || 64) === 1
+      (item) => (item?.stack_size || 64) === 1
     );
     const hasSixteen = forcedItems.some(
-      (item) => (item.stack_size || 64) === 16
+      (item) => (item?.stack_size || 64) === 16
     );
     const hasSixtyFour = forcedItems.some(
-      (item) => (item.stack_size || 64) === 64
+      (item) => (item?.stack_size || 64) === 64
     );
 
     // Strategy 1: Duplicate unstackables if available (only if no quantity adjustments exist)
     if (hasUnstackable && !hasQuantityAdjustments) {
       // Find the most common unstackable to duplicate (prefer lower rarity)
       const unstackables = forcedItems.filter(
-        (item) => (item.stack_size || 64) === 1
+        (item) => (item?.stack_size || 64) === 1
       );
+      const rarityOrder: Dictionary<number> = {
+        common: 0,
+        uncommon: 1,
+        rare: 2,
+        epic: 3,
+      };
+      const getRarityOrder = (item: Item | null) =>
+        item ? rarityOrder[item.rarity] ?? 0 : 0;
+      //TODO: reduce() instead of sort() to get the least rare
       const targetUnstackable = unstackables.sort((a, b) => {
-        const rarityOrder = { common: 0, uncommon: 1, rare: 2, epic: 3 };
-        return (rarityOrder[a.rarity] || 0) - (rarityOrder[b.rarity] || 0);
+        return getRarityOrder(a) - getRarityOrder(b);
       })[0];
 
       if (targetUnstackable) {
         // Fill empty slots with this unstackable until signal increments
+        // TODO: This probably could be replaced with a map()
         for (let i = 1; i < optimizedSlots.length; i++) {
           if (optimizedSlots[i] === null) {
             optimizedSlots[i] = {
@@ -1744,17 +1925,19 @@ export default function MinecraftItemBuilder() {
     if (hasSixteen) {
       while (true) {
         let incremented = false;
+        // TODO: Use for(const item of optimizedSlots.reverse().filter(...))
         for (let i = optimizedSlots.length - 1; i >= 1; i--) {
+          const item = optimizedSlots[i];
           if (
-            optimizedSlots[i] &&
-            optimizedSlots[i].forceAdjusted === true &&
-            (optimizedSlots[i].stack_size || 64) === 16
+            item &&
+            item.forceAdjusted === true &&
+            (item.stack_size || 64) === 16
           ) {
-            if (optimizedSlots[i].quantity < 16) {
-              optimizedSlots[i].quantity++;
+            if (item.quantity < 16) {
+              item.quantity++;
               const newSignal = calculateSignalStrength(optimizedSlots);
               if (newSignal > currentSignal) {
-                optimizedSlots[i].quantity--;
+                item.quantity--;
                 break;
               }
               incremented = true;
@@ -1770,17 +1953,19 @@ export default function MinecraftItemBuilder() {
     if (hasSixtyFour) {
       while (true) {
         let incremented = false;
+        // TODO: Use for(const item of optimizedSlots.reverse().filter(...))
         for (let i = optimizedSlots.length - 1; i >= 1; i--) {
+          const item = optimizedSlots[i];
           if (
-            optimizedSlots[i] &&
-            optimizedSlots[i].forceAdjusted === true &&
-            (optimizedSlots[i].stack_size || 64) === 64
+            item &&
+            item.forceAdjusted === true &&
+            (item.stack_size || 64) === 64
           ) {
-            if (optimizedSlots[i].quantity < 64) {
-              optimizedSlots[i].quantity++;
+            if (item.quantity < 64) {
+              item.quantity++;
               const newSignal = calculateSignalStrength(optimizedSlots);
               if (newSignal > currentSignal) {
-                optimizedSlots[i].quantity--;
+                item.quantity--;
                 break;
               }
               incremented = true;
@@ -1799,10 +1984,12 @@ export default function MinecraftItemBuilder() {
       if (finalSignal === currentSignal) {
         // Check if all items are at their stack limits
         let allMaxed = true;
+        // TODO: allMaxed = !optimizedSlots.some((item) => item && item.forceAdjusted === true && item.quantity < (item.stack_size || 64))
         for (let i = 1; i < optimizedSlots.length; i++) {
-          if (optimizedSlots[i] && optimizedSlots[i].forceAdjusted === true) {
-            const stackLimit = optimizedSlots[i].stack_size || 64;
-            if (optimizedSlots[i].quantity < stackLimit) {
+          const item = optimizedSlots[i];
+          if (item && item.forceAdjusted === true) {
+            const stackLimit = item.stack_size || 64;
+            if (item.quantity < stackLimit) {
               allMaxed = false;
               break;
             }
@@ -1815,7 +2002,13 @@ export default function MinecraftItemBuilder() {
           const availableItems = forcedItems
             .filter((item) => item !== null)
             .sort((a, b) => {
-              const rarityOrder = { common: 0, uncommon: 1, rare: 2, epic: 3 };
+              // TODO: Make a reusable getRarityOrder function, instead of duplicating this
+              const rarityOrder: Dictionary<number> = {
+                common: 0,
+                uncommon: 1,
+                rare: 2,
+                epic: 3,
+              };
               const rarityA = rarityOrder[a.rarity] || 0;
               const rarityB = rarityOrder[b.rarity] || 0;
               if (rarityA !== rarityB) return rarityA - rarityB;
@@ -1826,17 +2019,18 @@ export default function MinecraftItemBuilder() {
 
           // Try duplicating items until adding a full stack would increment signal
           for (const itemToDuplicate of availableItems) {
+            // TODO: Ideally this should be a map()
             for (let i = 1; i < optimizedSlots.length; i++) {
               if (optimizedSlots[i] === null) {
-                optimizedSlots[i] = {
+                const item: OptimizedSlot = (optimizedSlots[i] = {
                   ...itemToDuplicate,
                   originalIndex: -1,
                   forceAdjusted: true,
-                };
+                });
                 const newSignal = calculateSignalStrength(optimizedSlots);
                 if (newSignal > currentSignal) {
                   // Keep this stack but set quantity to 1, then Strategy 5 will fine-tune it
-                  optimizedSlots[i].quantity = 1;
+                  item.quantity = 1; // Yes, this updates optimizedSlots. Not ideal but it works for now.
                   break;
                 }
               }
@@ -1855,14 +2049,16 @@ export default function MinecraftItemBuilder() {
     let reachedThreshold = false;
     while (true) {
       let incremented = false;
+      // TODO: Use for(const item of optimizedSlots.reverse().filter(...))
       for (let i = optimizedSlots.length - 1; i >= 1; i--) {
-        if (optimizedSlots[i] && optimizedSlots[i].forceAdjusted === true) {
-          const stackLimit = optimizedSlots[i].stack_size || 64;
-          if (optimizedSlots[i].quantity < stackLimit) {
-            optimizedSlots[i].quantity++;
+        const item = optimizedSlots[i];
+        if (item && item.forceAdjusted === true) {
+          const stackLimit = item.stack_size || 64;
+          if (item.quantity < stackLimit) {
+            item.quantity++;
             const newSignal = calculateSignalStrength(optimizedSlots);
             if (newSignal > currentSignal) {
-              optimizedSlots[i].quantity--;
+              item.quantity--;
               reachedThreshold = true;
               break;
             }
@@ -1876,25 +2072,29 @@ export default function MinecraftItemBuilder() {
 
     // Recalculate forceAdjusted flags AFTER quantities have been adjusted
     // An item is adjusted if: (1) quantity > 1, OR (2) multiple instances exist
+    // TODO: Use a for-of
     for (let i = 1; i < optimizedSlots.length; i++) {
-      if (optimizedSlots[i]) {
-        const hasMultipleInstances = itemCounts[optimizedSlots[i].id] > 1;
-        const hasQuantity = (optimizedSlots[i].quantity || 1) > 1;
-        optimizedSlots[i].forceAdjusted = hasQuantity || hasMultipleInstances;
+      const item = optimizedSlots[i];
+      if (item) {
+        const hasMultipleInstances = (itemCounts[item.id] ?? 0) > 1;
+        const hasQuantity = (item.quantity || 1) > 1;
+        item.forceAdjusted = hasQuantity || hasMultipleInstances;
       }
     }
 
     // Organize into adjusted vs unadjusted
     const unadjusted = [];
     const adjusted = [];
+    // TODO: Simply fill adjusted and unadjusted with optimizedSlots.filter().map()
     for (let i = 1; i < optimizedSlots.length; i++) {
-      if (optimizedSlots[i] !== null) {
-        if (optimizedSlots[i].forceAdjusted === true) {
-          optimizedSlots[i].isAdjusted = true;
-          adjusted.push(optimizedSlots[i]);
+      const item = optimizedSlots[i];
+      if (item != null) {
+        if (item.forceAdjusted === true) {
+          item.isAdjusted = true;
+          adjusted.push(item);
         } else {
-          optimizedSlots[i].isAdjusted = false;
-          unadjusted.push(optimizedSlots[i]);
+          item.isAdjusted = false;
+          unadjusted.push(item);
         }
       }
     }
@@ -1909,7 +2109,8 @@ export default function MinecraftItemBuilder() {
     });
 
     // Calculate null padding
-    const nullsNeeded = 53 - unadjusted.length - adjusted.length;
+    const nullsNeeded = 53 - unadjusted.length - adjusted.length; // TODO: Maybe clamp minimum value to 0
+    // TODO: return [null, ...unadjusted, ...Array(nullsNeeded).fill(null)), ...adjusted]
     const result = [null, ...unadjusted];
     for (let i = 0; i < nullsNeeded; i++) {
       result.push(null);
@@ -1920,7 +2121,11 @@ export default function MinecraftItemBuilder() {
   };
 
   // Calculate HSL color distance between two items
-  const getColorDistance = (item1, item2) => {
+  const getColorDistance = (
+    item1: Item | null | undefined,
+    item2: Item | null | undefined
+  ) => {
+    // TODO: if(item1?.color?.hsl == null || item2?.color?.hsl == null) return Infinity;
     if (!item1 || !item2 || !item1.color || !item2.color) return Infinity;
 
     const hsl1 = item1.color.hsl;
@@ -1943,7 +2148,7 @@ export default function MinecraftItemBuilder() {
   };
 
   // Sort cell items by color similarity (greedy nearest neighbor)
-  const sortCellByColor = (cellId) => {
+  const sortCellByColor = (cellId: number) => {
     saveToHistory();
 
     setCells(
@@ -1955,7 +2160,8 @@ export default function MinecraftItemBuilder() {
         if (items.length <= 1) return cell; // Nothing to sort
 
         // Greedy nearest neighbor algorithm
-        const sorted = [items[0]]; // Start with first item
+        // TODO: None of this is necessary. It's not even quicksort. Just use items.sort(...)
+        const sorted: (Item | null)[] = items.slice(0, 1); // Start with first item
         const remaining = items.slice(1);
 
         while (remaining.length > 0) {
@@ -1974,11 +2180,12 @@ export default function MinecraftItemBuilder() {
           }
 
           // Add closest item to sorted list and remove from remaining
-          sorted.push(remaining[closestIndex]);
+          sorted.push(remaining[closestIndex] ?? null);
           remaining.splice(closestIndex, 1);
         }
 
         // Pad with nulls to maintain 53 usable slots
+        // TODO: sorted.concat(Array(Math.max(53 - sorted.length, 0)).fill(null))
         while (sorted.length < 53) {
           sorted.push(null);
         }
@@ -1990,17 +2197,15 @@ export default function MinecraftItemBuilder() {
   };
 
   // Calculate character similarity between two tokens (used as tiebreaker)
-  const getTokenCharacterSimilarity = (token1, token2) => {
+  const getTokenCharacterSimilarity = (token1: string, token2: string) => {
     if (token1 === token2) return 1; // Perfect match
 
-    const longer = token1.length > token2.length ? token1 : token2;
-    const shorter = token1.length > token2.length ? token2 : token1;
+    // Determine which is shorter
+    const [shorter, longer] =
+      token1.length > token2.length ? [token2, token1] : [token1, token2];
 
     // Count matching characters
-    let matches = 0;
-    for (let i = 0; i < shorter.length; i++) {
-      if (longer.includes(shorter[i])) matches++;
-    }
+    let matches = shorter.split("").filter((c) => longer.includes(c)).length;
 
     // Normalize to 0-1 range
     return matches / longer.length;
@@ -2008,7 +2213,10 @@ export default function MinecraftItemBuilder() {
 
   // Calculate namespace similarity between two items
   // Priority: 1) Same material, 2) Exact token matches, 3) Character similarity
-  const getNamespaceSimilarity = (item1, item2) => {
+  const getNamespaceSimilarity = (
+    item1: { id: string; material: unknown } | undefined,
+    item2: { id: string; material: unknown } | undefined
+  ) => {
     if (!item1 || !item2 || !item1.id || !item2.id)
       return { material: 0, tokens: 0, chars: 0 };
 
@@ -2023,6 +2231,7 @@ export default function MinecraftItemBuilder() {
     const tokens2 = item2.id.split("_");
 
     // Count exact token matches (second priority)
+    // TODO: exactTokenMatches = tokens1.filter(token1 => tokens2.includes(token1)).length
     let exactTokenMatches = 0;
     for (const token1 of tokens1) {
       for (const token2 of tokens2) {
@@ -2052,7 +2261,7 @@ export default function MinecraftItemBuilder() {
   };
 
   // Load and parse compound tokens that must stay together
-  const [compoundTokens, setCompoundTokens] = useState([]);
+  const [compoundTokens, setCompoundTokens] = useState<string[]>([]);
 
   useEffect(() => {
     fetch("stokens.txt?v=" + Date.now())
@@ -2070,10 +2279,11 @@ export default function MinecraftItemBuilder() {
   }, []);
 
   // Normalize an ID by replacing compound tokens with single units
-  const normalizeId = (id, compounds) => {
+  const normalizeId = (id: string, compounds: string[]) => {
     let normalized = id;
-    const replacements = [];
+    const replacements: { placeholder: string; original: string }[] = [];
 
+    // TODO: Use compounds.filter(compound => normalized.includes(compound))
     compounds.forEach((compound, idx) => {
       if (normalized.includes(compound)) {
         const placeholder = `COMPOUND${idx}`;
@@ -2086,7 +2296,13 @@ export default function MinecraftItemBuilder() {
   };
 
   // Denormalize by restoring compound tokens
-  const denormalizeId = (id, replacements) => {
+  const denormalizeId = (
+    id: string,
+    replacements: {
+      placeholder: string;
+      original: string;
+    }[]
+  ) => {
     let denormalized = id;
     replacements.forEach(({ placeholder, original }) => {
       denormalized = denormalized.replace(
@@ -2099,7 +2315,7 @@ export default function MinecraftItemBuilder() {
 
   // Find the best split point for all items in a cell
   // Returns the index where we should split tokens into [prefix tokens] and [suffix tokens]
-  const findBestSplitPoint = (items) => {
+  const findBestSplitPoint = (items: Item[]) => {
     if (items.length === 0) return 1;
 
     // Normalize all IDs first
@@ -2124,6 +2340,7 @@ export default function MinecraftItemBuilder() {
       const prefixes = new Set();
       const suffixes = new Set();
 
+      // TODO: This could be a filter().map() then feed it to the Set constructor
       allTokens.forEach((tokens) => {
         if (tokens.length >= splitIdx) {
           const prefix = tokens.slice(0, splitIdx).join("_");
@@ -2148,7 +2365,10 @@ export default function MinecraftItemBuilder() {
 
   // Split an item ID into prefix and suffix based on split point
   // Returns { prefix: string, suffix: string }
-  const splitItemId = (item, splitPoint) => {
+  const splitItemId = (
+    item: Slot | undefined,
+    splitPoint: number | undefined
+  ) => {
     if (!item || !item.id) return { prefix: "", suffix: "" };
 
     // Normalize the ID
@@ -2168,7 +2388,7 @@ export default function MinecraftItemBuilder() {
 
   // Sort cell items by namespace: groups by prefix, arranges suffixes in sequence
   // Example: [pale_oak_planks, pale_oak_stairs, pale_oak_slab, dark_oak_planks, dark_oak_stairs, dark_oak_slab]
-  const sortCellByNamespace = (cellId) => {
+  const sortCellByNamespace = (cellId: number) => {
     saveToHistory();
 
     setCells(
@@ -2188,7 +2408,7 @@ export default function MinecraftItemBuilder() {
         });
 
         // Group by prefix
-        const groups = {};
+        const groups: Dictionary<typeof itemsWithSplit> = {};
         itemsWithSplit.forEach(({ item, prefix, suffix }) => {
           const key = prefix || "_no_prefix";
           if (!groups[key]) groups[key] = [];
@@ -2204,21 +2424,22 @@ export default function MinecraftItemBuilder() {
 
         if (firstGroup && firstGroup.length > 0) {
           // Sort first group by similarity, extract suffix pattern
-          const firstSorted = [firstGroup[0]];
+          const firstSorted = firstGroup.slice(0, 1);
           const remaining = firstGroup.slice(1);
 
+          // TODO: No. Stop. This is array sorting. Put this stuff in a sort()
           while (remaining.length > 0) {
             const current = firstSorted[firstSorted.length - 1];
             let bestIdx = 0;
             let bestSim = getNamespaceSimilarity(
-              current.item,
-              remaining[0].item
+              current?.item,
+              remaining[0]?.item
             );
 
             for (let i = 1; i < remaining.length; i++) {
               const sim = getNamespaceSimilarity(
-                current.item,
-                remaining[i].item
+                current?.item,
+                remaining[i]?.item
               );
               if (
                 sim.tokens > bestSim.tokens ||
@@ -2229,7 +2450,12 @@ export default function MinecraftItemBuilder() {
               }
             }
 
-            firstSorted.push(remaining[bestIdx]);
+            const bestItem = remaining[bestIdx];
+            if (bestItem == null)
+              throw Error(
+                "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+              );
+            firstSorted.push(bestItem);
             remaining.splice(bestIdx, 1);
           }
 
@@ -2241,14 +2467,14 @@ export default function MinecraftItemBuilder() {
           delete groups[firstKey];
 
           // Apply pattern to other groups
-          Object.keys(groups).forEach((key) => {
-            const group = groups[key];
+          Object.values(groups).forEach((group) => {
             const groupSorted = [];
 
+            // TODO: Could probably fill groupSorted with a map() instead
             pattern.forEach((pat) => {
               const idx = group.findIndex(({ suffix }) => suffix === pat);
               if (idx !== -1) {
-                groupSorted.push(group[idx].item);
+                groupSorted.push(group[idx]?.item);
                 group.splice(idx, 1);
               }
             });
@@ -2260,6 +2486,7 @@ export default function MinecraftItemBuilder() {
         }
 
         // Pad with nulls to maintain 53 usable slots
+        // TODO: sorted.concat(Array(Math.max(53 - sorted.length, 0)).fill(null))
         while (sorted.length < 53) {
           sorted.push(null);
         }
@@ -2272,7 +2499,7 @@ export default function MinecraftItemBuilder() {
 
   // Sort cell items by type: groups by suffix, arranges prefixes in sequence
   // Example: [pale_oak_planks, dark_oak_planks, pale_oak_stairs, dark_oak_stairs]
-  const sortCellByType = (cellId) => {
+  const sortCellByType = (cellId: number) => {
     saveToHistory();
 
     setCells(
@@ -2292,7 +2519,7 @@ export default function MinecraftItemBuilder() {
         });
 
         // Group by suffix (type)
-        const groups = {};
+        const groups: Dictionary<typeof itemsWithSplit> = {};
         itemsWithSplit.forEach(({ item, prefix, suffix }) => {
           const key = suffix || "_no_suffix";
           if (!groups[key]) groups[key] = [];
@@ -2308,21 +2535,22 @@ export default function MinecraftItemBuilder() {
 
         if (firstGroup && firstGroup.length > 0) {
           // Sort first group by similarity, extract prefix order
-          const firstSorted = [firstGroup[0]];
+          const firstSorted = firstGroup.slice(0, 1);
           const remaining = firstGroup.slice(1);
 
+          // TODO: Use sort()
           while (remaining.length > 0) {
             const current = firstSorted[firstSorted.length - 1];
             let bestIdx = 0;
             let bestSim = getNamespaceSimilarity(
-              current.item,
-              remaining[0].item
+              current?.item,
+              remaining[0]?.item
             );
 
             for (let i = 1; i < remaining.length; i++) {
               const sim = getNamespaceSimilarity(
-                current.item,
-                remaining[i].item
+                current?.item,
+                remaining[i]?.item
               );
               if (
                 sim.tokens > bestSim.tokens ||
@@ -2333,7 +2561,12 @@ export default function MinecraftItemBuilder() {
               }
             }
 
-            firstSorted.push(remaining[bestIdx]);
+            const bestItem = remaining[bestIdx];
+            if (bestItem == null)
+              throw Error(
+                "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+              );
+            firstSorted.push(bestItem);
             remaining.splice(bestIdx, 1);
           }
 
@@ -2345,14 +2578,13 @@ export default function MinecraftItemBuilder() {
           delete groups[firstKey];
 
           // Apply prefix order to other suffix groups
-          Object.keys(groups).forEach((key) => {
-            const group = groups[key];
+          Object.values(groups).forEach((group) => {
             const groupSorted = [];
 
             prefixOrder.forEach((pre) => {
               const idx = group.findIndex(({ prefix }) => prefix === pre);
               if (idx !== -1) {
-                groupSorted.push(group[idx].item);
+                groupSorted.push(group[idx]?.item);
                 group.splice(idx, 1);
               }
             });
@@ -2364,6 +2596,7 @@ export default function MinecraftItemBuilder() {
         }
 
         // Pad with nulls to maintain 53 usable slots
+        // TODO: Use sorted.concat(Array(Math.max(53 - sorted.length, 0)).fill(null))
         while (sorted.length < 53) {
           sorted.push(null);
         }
@@ -2373,7 +2606,8 @@ export default function MinecraftItemBuilder() {
       })
     );
   };
-  const clearSlot = (cellId, slotIndex) => {
+
+  const clearSlot = (cellId: number, slotIndex: number) => {
     saveToHistory();
 
     // If there's a selection, clear all selected items
@@ -2387,6 +2621,7 @@ export default function MinecraftItemBuilder() {
             .map((s) => s.slotIndex)
             .sort((a, b) => b - a); // Sort descending to remove from end first
 
+          // TODO: This could be a newSlots.filter() followed by padding with null
           slotsToRemove.forEach((idx) => {
             newSlots.splice(idx, 1);
             newSlots.push(null);
@@ -2423,7 +2658,7 @@ export default function MinecraftItemBuilder() {
 
     // Always reorder cells when toggling
     setCells(
-      cells.map((cell) => {
+      cells.map((cell): Cell => {
         if (newDisplayMode) {
           // Enabling displayMode: reorder to match optimized display
           const optimizedSlots = optimizeForRedstone(cell.slots);
@@ -2435,7 +2670,10 @@ export default function MinecraftItemBuilder() {
 
             // Create clean copy without optimization metadata
             // But PRESERVE isDuplicate, forceAdjusted, and userSubstituted flags
-            const cleanSlot = { ...slot };
+            const cleanSlot: Slot = {
+              ...slot,
+            };
+            // TODO: Why even remove those props?
             delete cleanSlot.quantity;
             delete cleanSlot.isAdjusted;
             delete cleanSlot.originalIndex;
@@ -2447,16 +2685,19 @@ export default function MinecraftItemBuilder() {
           return { ...cell, slots: reorderedSlots };
         } else {
           // Disabling displayMode: compact items (remove gaps)
-          const compactedSlots = [null]; // Slot 0 is always null
+          const compactedSlots: (Slot | null)[] = [null]; // Slot 0 is always null
 
           // Collect all non-null items
+          // TODO: Use filter()
           for (let i = 1; i < cell.slots.length; i++) {
-            if (cell.slots[i] !== null) {
-              compactedSlots.push(cell.slots[i]);
+            const slot = cell.slots[i];
+            if (slot != null) {
+              compactedSlots.push(slot);
             }
           }
 
           // Fill remaining slots with null
+          // TODO: compactedSlots.concat(Array(Math.max(53 - compactedSlots.length, 0)).fill(null))
           while (compactedSlots.length < 54) {
             compactedSlots.push(null);
           }
@@ -2472,9 +2713,9 @@ export default function MinecraftItemBuilder() {
   // Substitute an adjusted item with another item in displayMode
   // Works by modifying the RAW cell.slots and letting optimizeForRedstone run on next render
   const substituteAdjustedItem = (
-    cellId,
-    targetDisplayIndex,
-    sourceDisplayIndex
+    cellId: number,
+    targetDisplayIndex: number,
+    sourceDisplayIndex: number
   ) => {
     saveToHistory();
 
@@ -2511,16 +2752,19 @@ export default function MinecraftItemBuilder() {
           return cell;
         }
 
+        if (sourceDisplayItem == null) {
+          console.log("REJECTED: Source doesn't exist");
+          return cell;
+        }
+
         // Mark all currently adjusted items with forceAdjusted flag
         // This prevents re-optimization after substitution
         console.log("Marking adjusted items with forceAdjusted:");
+        // TODO: Use for-of with filter()
         for (let i = 1; i < displaySlots.length; i++) {
-          if (
-            displaySlots[i] &&
-            displaySlots[i].isAdjusted &&
-            displaySlots[i].originalIndex >= 0
-          ) {
-            const origIdx = displaySlots[i].originalIndex;
+          const slot = displaySlots[i];
+          if (slot && slot.isAdjusted && slot.originalIndex >= 0) {
+            const origIdx = slot.originalIndex;
             if (cell.slots[origIdx]) {
               console.log(
                 "  Marking",
@@ -2545,14 +2789,14 @@ export default function MinecraftItemBuilder() {
           "Items with forceAdjusted in newSlots:",
           newSlots
             .filter((s, i) => i > 0 && s && s.forceAdjusted)
-            .map((s) => s.id)
+            .map((s) => s?.id)
         );
 
         // Step 3: Build a precise mapping from display items to actual slots
         // Track which actual indices we've already matched to handle duplicates
         const usedIndices = new Set();
 
-        const findActualIndexForDisplay = (displayItem) => {
+        const findActualIndexForDisplay = (displayItem: OptimizedSlot) => {
           // For items with originalIndex >= 0, use it directly
           if (
             displayItem.originalIndex !== undefined &&
@@ -2564,12 +2808,10 @@ export default function MinecraftItemBuilder() {
 
           // For duplicated items (originalIndex === -1 or undefined), match by ID
           // Find all raw slots with matching ID that haven't been used yet
+          // TODO: Use entries() and find()
           for (let i = 1; i < newSlots.length; i++) {
-            if (
-              newSlots[i] &&
-              newSlots[i].id === displayItem.id &&
-              !usedIndices.has(i)
-            ) {
+            const slot = newSlots[i];
+            if (slot && slot.id === displayItem.id && !usedIndices.has(i)) {
               usedIndices.add(i);
               return i;
             }
@@ -2649,8 +2891,10 @@ export default function MinecraftItemBuilder() {
 
             // Count total instances and collect their positions
             const positions = [];
+            // TODO: Use entries() filter() and map()
             for (let i = 1; i < newSlots.length; i++) {
-              if (newSlots[i] && newSlots[i].id === itemId) {
+              const slot = newSlots[i];
+              if (slot && slot.id === itemId) {
                 positions.push(i);
               }
             }
@@ -2679,19 +2923,29 @@ export default function MinecraftItemBuilder() {
                 "remainder"
               );
 
+              const firstSlot = newSlots[positions[0] ?? 0];
+              if (firstSlot == null)
+                throw Error(
+                  "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+                );
               // Create clean base item
-              const baseItem = { ...newSlots[positions[0]] };
+              const baseItem = {
+                ...firstSlot,
+              };
+              // TODO: Why delete those properties?
               delete baseItem.quantity;
               delete baseItem.isAdjusted;
               delete baseItem.originalIndex;
               delete baseItem.forceAdjusted;
 
               // Remove all instances
-              for (let i = positions.length - 1; i >= 0; i--) {
-                newSlots.splice(positions[i], 1);
+              // TODO: Use entries() filter() and map() into a new variable (or make newSlots not a const)
+              for (const position of positions.reverse()) {
+                newSlots.splice(position, 1);
               }
 
               // Add back consolidated stacks at the end
+              // TODO: Use concat() with Array(fullStacks).fill()
               for (let i = 0; i < fullStacks; i++) {
                 newSlots.push({ ...baseItem, forceAdjusted: true });
               }
@@ -2700,6 +2954,7 @@ export default function MinecraftItemBuilder() {
               }
 
               // Fill to maintain 54 slots
+              // TODO: Use finalSlots.concat(Array(Math.max(54 - finalSlots.length, 0)).fill(null))
               while (newSlots.length < 54) {
                 newSlots.push(null);
               }
@@ -2722,7 +2977,15 @@ export default function MinecraftItemBuilder() {
           );
 
           // Create clean copies without optimization metadata
-          const baseSource = { ...newSlots[sourceActualIndex] };
+          // TODO: Why are those props being removed?
+          const sourceSlot = newSlots[sourceActualIndex];
+          if (sourceSlot == null)
+            throw Error(
+              "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+            );
+          const baseSource: Slot = {
+            ...sourceSlot,
+          };
           delete baseSource.quantity;
           delete baseSource.isAdjusted;
           delete baseSource.originalIndex;
@@ -2730,7 +2993,14 @@ export default function MinecraftItemBuilder() {
           // Mark as forceAdjusted to keep it in adjusted group
           baseSource.forceAdjusted = true;
 
-          const baseTarget = { ...newSlots[targetActualIndex] };
+          const targetSlot = newSlots[targetActualIndex];
+          if (targetSlot == null)
+            throw Error(
+              "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+            );
+          const baseTarget: Slot = {
+            ...targetSlot,
+          };
           delete baseTarget.quantity;
           delete baseTarget.isAdjusted;
           delete baseTarget.originalIndex;
@@ -2748,9 +3018,9 @@ export default function MinecraftItemBuilder() {
           );
 
           // Ensure source has forceAdjusted flag (in case it wasn't already marked)
-          if (!newSlots[sourceActualIndex].forceAdjusted) {
+          if (!sourceSlot.forceAdjusted) {
             newSlots[sourceActualIndex] = {
-              ...newSlots[sourceActualIndex],
+              ...sourceSlot,
               forceAdjusted: true,
             };
           }
@@ -2767,6 +3037,7 @@ export default function MinecraftItemBuilder() {
           // Find the first null slot BEFORE the adjusted items to place the displaced target
           // We want it in the unadjusted section
           let insertPosition = -1;
+          // TODO: Use findIndex()
           for (let i = 1; i < newSlots.length; i++) {
             if (newSlots[i] === null) {
               insertPosition = i;
@@ -2817,42 +3088,56 @@ export default function MinecraftItemBuilder() {
             // Check if both are unstackables
             if (targetStackSize === 1 && sourceStackSize === 1) {
               // Replace ALL instances of target unstackable with source
-              const baseSource = { ...newSlots[sourceActualIndex] };
+              const sourceSlot = newSlots[sourceActualIndex];
+              if (sourceSlot == null)
+                throw Error(
+                  "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+                );
+              const baseSource: Slot = {
+                ...sourceSlot,
+              };
+              // TODO: Once again. What is the point of deleting those props?
               delete baseSource.quantity;
               delete baseSource.isAdjusted;
               delete baseSource.originalIndex;
 
               // Save one instance of the target to place back in cell
-              const baseTarget = { ...newSlots[targetActualIndex] };
+              const targetSlot = newSlots[targetActualIndex];
+              if (targetSlot == null)
+                throw Error(
+                  "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+                );
+              const baseTarget: Slot = { ...targetSlot };
               delete baseTarget.quantity;
               delete baseTarget.isAdjusted;
               delete baseTarget.originalIndex;
               delete baseTarget.forceAdjusted;
               delete baseTarget.isDuplicate;
 
-              const sourceId = baseSource.id;
-
               // Remove source FIRST (before replacement) to avoid confusion
               newSlots.splice(sourceActualIndex, 1);
               newSlots.push(null); // Add null at end to maintain 54 slots
 
               // Now find and replace all instances of target (avoiding the source item we just removed)
+              // TODO: Use for-of with entries() and filter()
               for (let i = 1; i < newSlots.length; i++) {
-                if (newSlots[i] && newSlots[i].id === targetId) {
+                const slot = newSlots[i];
+                if (slot && slot.id === targetId) {
                   // Preserve isDuplicate and forceAdjusted flags
-                  const wasDuplicate = newSlots[i].isDuplicate;
-                  const wasForceAdjusted = newSlots[i].forceAdjusted;
+                  const wasDuplicate = slot.isDuplicate;
+                  const wasForceAdjusted = slot.forceAdjusted;
                   newSlots[i] = { ...baseSource };
                   if (wasDuplicate) {
-                    newSlots[i].isDuplicate = true;
+                    slot.isDuplicate = true;
                   }
                   if (wasForceAdjusted) {
-                    newSlots[i].forceAdjusted = true;
+                    slot.forceAdjusted = true;
                   }
                 }
               }
 
               // Place the displaced target in the first available null slot
+              // TODO: Use findIndex()
               for (let i = 1; i < newSlots.length; i++) {
                 if (newSlots[i] === null) {
                   newSlots[i] = baseTarget;
@@ -2861,7 +3146,13 @@ export default function MinecraftItemBuilder() {
               }
             } else {
               // Regular duplicate case - just replace the one we dropped onto
-              const baseSource = { ...newSlots[sourceActualIndex] };
+              const sourceSlot = newSlots[sourceActualIndex];
+              if (sourceSlot == null)
+                throw Error(
+                  "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+                );
+              // TODO: Stop deleting props for no reason
+              const baseSource: Slot = { ...sourceSlot };
               delete baseSource.quantity;
               delete baseSource.isAdjusted;
               delete baseSource.originalIndex;
@@ -2880,13 +3171,24 @@ export default function MinecraftItemBuilder() {
             // Target is unique - swap source and target positions directly
 
             // Save both items
-            const baseTarget = { ...newSlots[targetActualIndex] };
+            const targetSlot = newSlots[targetActualIndex];
+            if (targetSlot == null)
+              throw Error(
+                "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+              );
+            const baseTarget: Slot = { ...targetSlot };
             const targetQuantity = baseTarget.quantity; // Save target's quantity
+            // TODO: Stop deleting props
             delete baseTarget.quantity;
             delete baseTarget.isAdjusted;
             delete baseTarget.originalIndex;
 
-            const baseSource = { ...newSlots[sourceActualIndex] };
+            const sourceSlot = newSlots[sourceActualIndex];
+            if (sourceSlot == null)
+              throw Error(
+                "This isn't supposed to be reached. This is a type guard to make the linter happy. At least until the code is reworked..."
+              );
+            const baseSource: Slot = { ...sourceSlot };
             delete baseSource.quantity;
             delete baseSource.isAdjusted;
             delete baseSource.originalIndex;
@@ -2915,6 +3217,7 @@ export default function MinecraftItemBuilder() {
               baseSource.quantity = targetQuantity;
             }
             // Target goes to source position in unadjusted section
+            // TODO: Don't delete props. Just change their values to null or something
             delete baseTarget.forceAdjusted;
             delete baseTarget.userSubstituted;
 
@@ -2951,7 +3254,13 @@ export default function MinecraftItemBuilder() {
   };
 
   // Cell drag handlers
-  const handleCellDragStart = (e, cellId) => {
+  const handleCellDragStart = (
+    e: React.DragEvent<HTMLDivElement>,
+    cellId: number
+  ) => {
+    if (!(e.target instanceof HTMLElement))
+      throw Error("Target isn't an HTMLElement");
+
     const isFromHeader = e.target.closest(".cell-drag-handle") !== null;
     if (!isFromHeader) {
       e.preventDefault();
@@ -2963,13 +3272,16 @@ export default function MinecraftItemBuilder() {
     e.dataTransfer.effectAllowed = "move";
   };
 
-  const handleCellDragEnd = (e) => {
+  const handleCellDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
     e.currentTarget.classList.remove("dragging-cell");
     setDraggedCell(null);
     setDragOverCell(null);
   };
 
-  const handleCellDragOver = (e, cellId) => {
+  const handleCellDragOver = (
+    e: React.DragEvent<HTMLDivElement>,
+    cellId: number
+  ) => {
     // Skip if not dragging a cell
     if (!draggedCell) return;
 
@@ -2982,7 +3294,7 @@ export default function MinecraftItemBuilder() {
     }
   };
 
-  const handleCellDragLeave = (e, cellId) => {
+  const handleCellDragLeave = (_: unknown, cellId: number) => {
     // Skip if not dragging a cell
     if (!draggedCell) return;
 
@@ -2992,30 +3304,36 @@ export default function MinecraftItemBuilder() {
     }
   };
 
-  const handleCellDrop = (e, targetCellId) => {
+  const handleCellDrop = (
+    e: React.DragEvent<HTMLDivElement>,
+    targetCellId: number
+  ) => {
     e.preventDefault();
     setDragOverCell(null);
 
     // If dragging a cell (reordering cells)
     if (draggedCell && draggedCell !== targetCellId) {
+      const result = cells.entries().find(([_, c]) => c.id === draggedCell);
+      if (result == null) throw Error("Dragged cell has an unknown id");
+      const [draggedIndex, cellToMove] = result;
+      const targetIndex = cells.findIndex((c) => c.id === targetCellId);
+      // TODO: Should probably check whether targetIndex != -1
+
+      // TODO: Use saveToHistory()
       // Clone cells efficiently using structured clone or simple spread
       const cellsSnapshot = cells.map((cell) => ({
         ...cell,
         slots: [...cell.slots],
       }));
-
       const newHistory = [...history, cellsSnapshot];
       if (newHistory.length > 10) {
         newHistory.shift();
       }
       setHistory(newHistory);
 
-      const draggedIndex = cells.findIndex((c) => c.id === draggedCell);
-      const targetIndex = cells.findIndex((c) => c.id === targetCellId);
-
       const newCells = [...cells];
-      const [removed] = newCells.splice(draggedIndex, 1);
-      newCells.splice(targetIndex, 0, removed);
+      newCells.splice(draggedIndex, 1);
+      newCells.splice(targetIndex, 0, cellToMove);
 
       setCells(newCells);
       setDraggedCell(null);
@@ -3026,6 +3344,9 @@ export default function MinecraftItemBuilder() {
     if (draggedItem || draggedSlot) {
       // Find first empty slot in the cell (starting from slot 1 to skip reserved slot 0)
       const targetCell = cells.find((c) => c.id === targetCellId);
+      if (targetCell == null) throw Error("Target cell has an unknown id");
+
+      // TODO: Use entries() and find()
       let firstEmptySlotIndex = -1;
       for (let i = 1; i < targetCell.slots.length; i++) {
         if (targetCell.slots[i] === null) {
@@ -3046,6 +3367,66 @@ export default function MinecraftItemBuilder() {
 
     setDraggedCell(null);
   };
+
+  function handleMinStatSlider(e: React.MouseEvent<Element, MouseEvent>) {
+    e.preventDefault();
+    const container = e.currentTarget.parentElement;
+    if (container == null) throw Error("EventTarget has no parents");
+    const rect = container.getBoundingClientRect();
+    const handleMove = (moveEvent: { clientY: number }) => {
+      const y = moveEvent.clientY - rect.top;
+      // Container is 140px: 128px for 0-100 range + 12px NA block at bottom
+      const sliderHeight = 128;
+      const naBlockHeight = 12;
+      let value;
+
+      if (y > sliderHeight + naBlockHeight / 2) {
+        // In NA zone (bottom 12px block)
+        value = null;
+      } else if (y > sliderHeight - 2) {
+        // Snap zone near boundary between 0 and NA
+        value = 0;
+      } else {
+        // Normal 0-100 range (top 128px)
+        const rawValue = (1 - y / sliderHeight) * 100;
+        value = Math.max(0, Math.min(100, Math.round(rawValue)));
+      }
+
+      const maxVal = statsPercentRange[1];
+      if (value === null || value < maxVal) {
+        setStatsPercentRange([value, maxVal]);
+      }
+    };
+    const handleUp = () => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+    };
+    handleMove(e);
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }
+
+  function handleMaxStatSlider(e: React.MouseEvent<Element, MouseEvent>) {
+    e.preventDefault();
+    const container = e.currentTarget.parentElement;
+    if (container == null) throw Error("EventTarget has no parents");
+    const rect = container.getBoundingClientRect();
+
+    const handleMove = (moveEvent: { clientY: number }) => {
+      const y = Math.max(0, Math.min(128, moveEvent.clientY - rect.top));
+      const sliderHeight = 128;
+      const value = Math.round((1 - y / sliderHeight) * 100);
+      const minVal = statsPercentRange[0] === null ? 0 : statsPercentRange[0];
+      setStatsPercentRange([statsPercentRange[0], Math.max(value, minVal)]);
+    };
+    const handleUp = () => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+    };
+    handleMove(e);
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("mouseup", handleUp);
+  }
 
   return (
     <div className="flex h-screen bg-stone-800 text-stone-100">
@@ -3621,60 +4002,7 @@ export default function MinecraftItemBuilder() {
                                   }px`,
                                   transform: "translateY(-50%)",
                                 }}
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  const container =
-                                    e.currentTarget.parentElement;
-                                  const rect =
-                                    container.getBoundingClientRect();
-                                  const handleMove = (moveEvent) => {
-                                    const y = moveEvent.clientY - rect.top;
-                                    // Container is 140px: 128px for 0-100 range + 12px NA block at bottom
-                                    const sliderHeight = 128;
-                                    const naBlockHeight = 12;
-                                    let value;
-
-                                    if (y > sliderHeight + naBlockHeight / 2) {
-                                      // In NA zone (bottom 12px block)
-                                      value = null;
-                                    } else if (y > sliderHeight - 2) {
-                                      // Snap zone near boundary between 0 and NA
-                                      value = 0;
-                                    } else {
-                                      // Normal 0-100 range (top 128px)
-                                      const rawValue =
-                                        (1 - y / sliderHeight) * 100;
-                                      value = Math.max(
-                                        0,
-                                        Math.min(100, Math.round(rawValue))
-                                      );
-                                    }
-
-                                    const maxVal = statsPercentRange[1];
-                                    if (value === null || value < maxVal) {
-                                      setStatsPercentRange([value, maxVal]);
-                                    }
-                                  };
-                                  const handleUp = () => {
-                                    document.removeEventListener(
-                                      "mousemove",
-                                      handleMove
-                                    );
-                                    document.removeEventListener(
-                                      "mouseup",
-                                      handleUp
-                                    );
-                                  };
-                                  handleMove(e);
-                                  document.addEventListener(
-                                    "mousemove",
-                                    handleMove
-                                  );
-                                  document.addEventListener(
-                                    "mouseup",
-                                    handleUp
-                                  );
-                                }}
+                                onMouseDown={handleMinStatSlider}
                               ></div>
 
                               {/* Slider track */}
@@ -3713,53 +4041,7 @@ export default function MinecraftItemBuilder() {
                                   }px`,
                                   transform: "translateY(-50%)",
                                 }}
-                                onMouseDown={(e) => {
-                                  e.preventDefault();
-                                  const container =
-                                    e.currentTarget.parentElement;
-                                  const rect =
-                                    container.getBoundingClientRect();
-                                  const handleMove = (moveEvent) => {
-                                    const y = Math.max(
-                                      0,
-                                      Math.min(
-                                        128,
-                                        moveEvent.clientY - rect.top
-                                      )
-                                    );
-                                    const sliderHeight = 128;
-                                    const value = Math.round(
-                                      (1 - y / sliderHeight) * 100
-                                    );
-                                    const minVal =
-                                      statsPercentRange[0] === null
-                                        ? 0
-                                        : statsPercentRange[0];
-                                    setStatsPercentRange([
-                                      statsPercentRange[0],
-                                      Math.max(value, minVal),
-                                    ]);
-                                  };
-                                  const handleUp = () => {
-                                    document.removeEventListener(
-                                      "mousemove",
-                                      handleMove
-                                    );
-                                    document.removeEventListener(
-                                      "mouseup",
-                                      handleUp
-                                    );
-                                  };
-                                  handleMove(e);
-                                  document.addEventListener(
-                                    "mousemove",
-                                    handleMove
-                                  );
-                                  document.addEventListener(
-                                    "mouseup",
-                                    handleUp
-                                  );
-                                }}
+                                onMouseDown={handleMaxStatSlider}
                               ></div>
                             </div>
                             <div className="text-xs text-stone-400 w-12 text-center">
@@ -3827,7 +4109,7 @@ export default function MinecraftItemBuilder() {
               onClick={handleBackgroundClick}
             >
               <div className="flex flex-wrap gap-6">
-                {cells.map((cell, cellIndex) => {
+                {cells.map((cell) => {
                   const isDragOverThisCell = dragOverCell === cell.id;
                   const displaySlots = displayMode
                     ? optimizeForRedstone(cell.slots)

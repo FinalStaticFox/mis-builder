@@ -8,7 +8,7 @@ import TypeSortIcon from "./assets/typesorticon.svg?react";
 import XIcon from "./assets/xicon.svg?react";
 
 import "./MinecraftItemBuilder.css";
-import { HueRangePicker } from "./components/HueRangePicker.js";
+import { HueRangePicker } from "./components/HueRangePicker";
 
 // Simple helper type
 export interface Dictionary<T> {
@@ -91,6 +91,146 @@ export type DraggedSlot =
       multiSelect: true;
       selectedSlots: SelectedSlot[]; // TODO: Get rid of multiSelect and instead simply check whether selectedSlots contains something
     };
+
+// Calculate redstone signal strength for a container
+// Based on: floor(14/inv_size * reduce(items, (item:1)/min(64, stack_limit(item:0)) + _a, 0) + min(1, length(items)))
+export function calculateSignalStrength(slots: (Slot | null)[]) {
+  const invSize = 54;
+  const items = slots.filter((item) => item !== null);
+
+  if (items.length === 0) return 0;
+
+  const fillSum = items.reduce((sum, item) => {
+    const stackLimit = Math.min(64, item.stack_size || 64);
+    const quantity = item.quantity || 1;
+    return sum + quantity / stackLimit;
+  }, 0);
+
+  return Math.floor((14 / invSize) * fillSum + Math.min(1, items.length));
+}
+
+// Normalize an ID by replacing compound tokens with single units
+function normalizeId(id: string, compounds: string[]) {
+  let normalized = id;
+  const replacements: { placeholder: string; original: string }[] = [];
+
+  // TODO: Use compounds.filter(compound => normalized.includes(compound))
+  compounds.forEach((compound, idx) => {
+    if (normalized.includes(compound)) {
+      const placeholder = `COMPOUND${idx}`;
+      normalized = normalized.replace(new RegExp(compound, "g"), placeholder);
+      replacements.push({ placeholder, original: compound });
+    }
+  });
+
+  return { normalized, replacements };
+}
+
+// Denormalize by restoring compound tokens
+function denormalizeId(
+  id: string,
+  replacements: {
+    placeholder: string;
+    original: string;
+  }[]
+) {
+  let denormalized = id;
+  replacements.forEach(({ placeholder, original }) => {
+    denormalized = denormalized.replace(new RegExp(placeholder, "g"), original);
+  });
+  return denormalized;
+}
+
+// Calculate namespace similarity between two items
+// Priority: 1) Same material, 2) Exact token matches, 3) Character similarity
+function getNamespaceSimilarity(
+  item1: { id: string; material: unknown } | undefined,
+  item2: { id: string; material: unknown } | undefined
+) {
+  if (!item1 || !item2 || !item1.id || !item2.id)
+    return { material: 0, tokens: 0, chars: 0 };
+
+  // Check if materials match (highest priority)
+  const materialMatch =
+    item1.material && item2.material && item1.material === item2.material
+      ? 1
+      : 0;
+
+  // Split IDs into tokens
+  const tokens1 = item1.id.split("_");
+  const tokens2 = item2.id.split("_");
+
+  // Count exact token matches (second priority)
+  // TODO: exactTokenMatches = tokens1.filter(token1 => tokens2.includes(token1)).length
+  let exactTokenMatches = 0;
+  for (const token1 of tokens1) {
+    for (const token2 of tokens2) {
+      if (token1 === token2) {
+        exactTokenMatches++;
+      }
+    }
+  }
+
+  // Calculate character similarity between tokens (tiebreaker)
+  let totalCharSimilarity = 0;
+  let comparisons = 0;
+  for (const token1 of tokens1) {
+    for (const token2 of tokens2) {
+      totalCharSimilarity += getTokenCharacterSimilarity(token1, token2);
+      comparisons++;
+    }
+  }
+  const avgCharSimilarity =
+    comparisons > 0 ? totalCharSimilarity / comparisons : 0;
+
+  return {
+    material: materialMatch,
+    tokens: exactTokenMatches,
+    chars: avgCharSimilarity,
+  };
+}
+
+// Calculate character similarity between two tokens (used as tiebreaker)
+function getTokenCharacterSimilarity(token1: string, token2: string) {
+  if (token1 === token2) return 1; // Perfect match
+
+  // Determine which is shorter
+  const [shorter, longer] =
+    token1.length > token2.length ? [token2, token1] : [token1, token2];
+
+  // Count matching characters
+  let matches = shorter.split("").filter((c) => longer.includes(c)).length;
+
+  // Normalize to 0-1 range
+  return matches / longer.length;
+}
+
+// Calculate HSL color distance between two items
+const getColorDistance = (
+  item1: Item | null | undefined,
+  item2: Item | null | undefined
+) => {
+  // TODO: if(item1?.color?.hsl == null || item2?.color?.hsl == null) return Infinity;
+  if (!item1 || !item2 || !item1.color || !item2.color) return Infinity;
+
+  const hsl1 = item1.color.hsl;
+  const hsl2 = item2.color.hsl;
+
+  if (!hsl1 || !hsl2) return Infinity;
+
+  // Hue is circular (0-360 degrees), so we need special distance calculation
+  let hueDiff = Math.abs(hsl1[0] - hsl2[0]);
+  if (hueDiff > 180) hueDiff = 360 - hueDiff;
+
+  // Normalize hue difference to 0-100 scale (like saturation and luminosity)
+  hueDiff = (hueDiff / 180) * 100;
+
+  const satDiff = Math.abs(hsl1[1] - hsl2[1]);
+  const lumDiff = Math.abs(hsl1[2] - hsl2[2]);
+
+  // Weighted Euclidean distance (hue is more important for visual similarity)
+  return Math.sqrt((hueDiff * 2) ** 2 + satDiff ** 2 + lumDiff ** 2);
+};
 
 export default function MinecraftItemBuilder() {
   const [catalogueItems, setCatalogueItems] = useState<Item[]>([]);
@@ -1405,23 +1545,6 @@ export default function MinecraftItemBuilder() {
     setDraggedSlot(null);
   };
 
-  // Calculate redstone signal strength for a container
-  // Based on: floor(14/inv_size * reduce(items, (item:1)/min(64, stack_limit(item:0)) + _a, 0) + min(1, length(items)))
-  const calculateSignalStrength = (slots: (Slot | null)[]) => {
-    const invSize = 54;
-    const items = slots.filter((item) => item !== null);
-
-    if (items.length === 0) return 0;
-
-    const fillSum = items.reduce((sum, item) => {
-      const stackLimit = Math.min(64, item.stack_size || 64);
-      const quantity = item.quantity || 1;
-      return sum + quantity / stackLimit;
-    }, 0);
-
-    return Math.floor((14 / invSize) * fillSum + Math.min(1, items.length));
-  };
-
   // Optimize container to ensure adding one more item increments signal strength
   const optimizeForRedstone = (
     slots: (Slot | null)[]
@@ -1738,33 +1861,6 @@ export default function MinecraftItemBuilder() {
     return result;
   };
 
-  // Calculate HSL color distance between two items
-  const getColorDistance = (
-    item1: Item | null | undefined,
-    item2: Item | null | undefined
-  ) => {
-    // TODO: if(item1?.color?.hsl == null || item2?.color?.hsl == null) return Infinity;
-    if (!item1 || !item2 || !item1.color || !item2.color) return Infinity;
-
-    const hsl1 = item1.color.hsl;
-    const hsl2 = item2.color.hsl;
-
-    if (!hsl1 || !hsl2) return Infinity;
-
-    // Hue is circular (0-360 degrees), so we need special distance calculation
-    let hueDiff = Math.abs(hsl1[0] - hsl2[0]);
-    if (hueDiff > 180) hueDiff = 360 - hueDiff;
-
-    // Normalize hue difference to 0-100 scale (like saturation and luminosity)
-    hueDiff = (hueDiff / 180) * 100;
-
-    const satDiff = Math.abs(hsl1[1] - hsl2[1]);
-    const lumDiff = Math.abs(hsl1[2] - hsl2[2]);
-
-    // Weighted Euclidean distance (hue is more important for visual similarity)
-    return Math.sqrt((hueDiff * 2) ** 2 + satDiff ** 2 + lumDiff ** 2);
-  };
-
   // Sort cell items by color similarity (greedy nearest neighbor)
   const sortCellByColor = (cellId: number) => {
     saveToHistory();
@@ -1814,70 +1910,6 @@ export default function MinecraftItemBuilder() {
     );
   };
 
-  // Calculate character similarity between two tokens (used as tiebreaker)
-  const getTokenCharacterSimilarity = (token1: string, token2: string) => {
-    if (token1 === token2) return 1; // Perfect match
-
-    // Determine which is shorter
-    const [shorter, longer] =
-      token1.length > token2.length ? [token2, token1] : [token1, token2];
-
-    // Count matching characters
-    let matches = shorter.split("").filter((c) => longer.includes(c)).length;
-
-    // Normalize to 0-1 range
-    return matches / longer.length;
-  };
-
-  // Calculate namespace similarity between two items
-  // Priority: 1) Same material, 2) Exact token matches, 3) Character similarity
-  const getNamespaceSimilarity = (
-    item1: { id: string; material: unknown } | undefined,
-    item2: { id: string; material: unknown } | undefined
-  ) => {
-    if (!item1 || !item2 || !item1.id || !item2.id)
-      return { material: 0, tokens: 0, chars: 0 };
-
-    // Check if materials match (highest priority)
-    const materialMatch =
-      item1.material && item2.material && item1.material === item2.material
-        ? 1
-        : 0;
-
-    // Split IDs into tokens
-    const tokens1 = item1.id.split("_");
-    const tokens2 = item2.id.split("_");
-
-    // Count exact token matches (second priority)
-    // TODO: exactTokenMatches = tokens1.filter(token1 => tokens2.includes(token1)).length
-    let exactTokenMatches = 0;
-    for (const token1 of tokens1) {
-      for (const token2 of tokens2) {
-        if (token1 === token2) {
-          exactTokenMatches++;
-        }
-      }
-    }
-
-    // Calculate character similarity between tokens (tiebreaker)
-    let totalCharSimilarity = 0;
-    let comparisons = 0;
-    for (const token1 of tokens1) {
-      for (const token2 of tokens2) {
-        totalCharSimilarity += getTokenCharacterSimilarity(token1, token2);
-        comparisons++;
-      }
-    }
-    const avgCharSimilarity =
-      comparisons > 0 ? totalCharSimilarity / comparisons : 0;
-
-    return {
-      material: materialMatch,
-      tokens: exactTokenMatches,
-      chars: avgCharSimilarity,
-    };
-  };
-
   // Load and parse compound tokens that must stay together
   const [compoundTokens, setCompoundTokens] = useState<string[]>([]);
 
@@ -1895,41 +1927,6 @@ export default function MinecraftItemBuilder() {
       })
       .catch((err) => console.error("Failed to load compound tokens:", err));
   }, []);
-
-  // Normalize an ID by replacing compound tokens with single units
-  const normalizeId = (id: string, compounds: string[]) => {
-    let normalized = id;
-    const replacements: { placeholder: string; original: string }[] = [];
-
-    // TODO: Use compounds.filter(compound => normalized.includes(compound))
-    compounds.forEach((compound, idx) => {
-      if (normalized.includes(compound)) {
-        const placeholder = `COMPOUND${idx}`;
-        normalized = normalized.replace(new RegExp(compound, "g"), placeholder);
-        replacements.push({ placeholder, original: compound });
-      }
-    });
-
-    return { normalized, replacements };
-  };
-
-  // Denormalize by restoring compound tokens
-  const denormalizeId = (
-    id: string,
-    replacements: {
-      placeholder: string;
-      original: string;
-    }[]
-  ) => {
-    let denormalized = id;
-    replacements.forEach(({ placeholder, original }) => {
-      denormalized = denormalized.replace(
-        new RegExp(placeholder, "g"),
-        original
-      );
-    });
-    return denormalized;
-  };
 
   // Find the best split point for all items in a cell
   // Returns the index where we should split tokens into [prefix tokens] and [suffix tokens]
@@ -2872,10 +2869,10 @@ export default function MinecraftItemBuilder() {
   };
 
   // Cell drag handlers
-  const handleCellDragStart = (
+  function handleCellDragStart(
     e: React.DragEvent<HTMLDivElement>,
     cellId: number
-  ) => {
+  ) {
     if (!(e.target instanceof HTMLElement))
       throw Error("Target isn't an HTMLElement");
 
@@ -2888,7 +2885,7 @@ export default function MinecraftItemBuilder() {
     setDraggedCell(cellId);
     e.currentTarget.classList.add("dragging-cell");
     e.dataTransfer.effectAllowed = "move";
-  };
+  }
 
   const handleCellDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
     e.currentTarget.classList.remove("dragging-cell");
